@@ -24,14 +24,16 @@ Alerter::Alerter(std::string script_path, int cooldown_sec, double threshold)
 
 bool Alerter::fire(Source source, const std::string& tmpl, const std::string& raw,
                    float loss) {
+    const int si = static_cast<int>(source);
     auto now = std::chrono::steady_clock::now();
-    if (fired_once_ &&
-        now - last_fire_ < std::chrono::seconds(cooldown_sec_)) {
-        SENTINEL_LOG_DEBUG("alert suppressed by cooldown (loss=%.4f)", loss);
+    if (fired_once_[si] &&
+        now - last_fire_[si] < std::chrono::seconds(cooldown_sec_)) {
+        SENTINEL_LOG_DEBUG("alert suppressed by cooldown (source=%s loss=%.4f)",
+                           source_name(source), loss);
         return false;
     }
-    last_fire_ = now;
-    fired_once_ = true;
+    last_fire_[si] = now;
+    fired_once_[si] = true;
 
     // Precompute environment values (copied into the child on fork).
     char loss_buf[32];

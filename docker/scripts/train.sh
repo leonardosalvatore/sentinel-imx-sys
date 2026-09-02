@@ -16,7 +16,10 @@ mkdir -p "${OUT_DIR}"
 
 args=(--output "${OUT_DIR}/model_quant.tflite")
 if [ -n "${CAPTURE}" ] && [ -f "${CAPTURE}" ]; then
-    args+=(--capture "${CAPTURE}")
+    # --dedupe: learn each distinct normal template once so a few very frequent
+    # patterns don't dominate and leave rare-but-normal messages under-learned.
+    # More epochs help the tiny net converge on the deduped (smaller) set.
+    args+=(--capture "${CAPTURE}" --dedupe --epochs 120)
 else
     echo "No capture file given; training on synthetic data (placeholder model)."
     args+=(--synthetic)

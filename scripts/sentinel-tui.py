@@ -12,6 +12,8 @@ standard library. Renders a full-screen, neon/synthwave dashboard showing:
   * a colorized live stream of the daemon's kernel/D-Bus detections
 
 Keys:  q = quit   a / SPACE = inject a synthetic anomaly into /dev/kmsg
+       n = toggle NPU stress (loops the showcase model so the load meter climbs)
+       c = clear the event-stream log at the bottom
 
 Usage (record this over SSH with a TTY):
     ssh -t root@<board> 'python3 /usr/local/bin/sentinel-tui.py'
@@ -31,6 +33,9 @@ from collections import deque
 SERVICE = os.environ.get("SENTINEL_SERVICE", "sentinel-imx.service")
 CAPTURE = os.environ.get("SENTINEL_CAPTURE_PATH", "/var/lib/sentinel-imx/capture.jsonl")
 GC_LOAD = "/sys/kernel/debug/gc/load"
+NPU_LOAD_SCRIPT = os.environ.get("SENTINEL_NPU_LOAD", "/usr/local/bin/npu-load.py")
+SHOWCASE_MODEL = os.environ.get("SENTINEL_SHOWCASE_MODEL",
+                                "/usr/share/sentinel-imx/model_showcase.tflite")
 
 # ---------------------------------------------------------------- palette ----
 def fg(r, g, b): return f"\033[38;2;{r};{g};{b}m"
@@ -320,6 +325,7 @@ def main():
     gc_hist = {}
     ev_cache = (0.0, 0)
     running = True
+    npu_load = None  # subprocess handle for the optional NPU stress generator
 
     def stop(*_):
         nonlocal running
@@ -397,7 +403,13 @@ def main():
                             (val_w, f"{WHITE}{int(val*100):3d}% {RESET}"))
                 accc.append(r)
                 accc.append(spark(gc_hist[core], iw))
-            note = f"{DIM}{GREY}tiny INT8 model → NPU finishes instantly; load stays low by design{RESET}"
+            stress_on = npu_load is not None and npu_load.poll() is None
+            if stress_on:
+                note = (f"{PINK}{BOLD}▶ NPU STRESS ACTIVE{RESET} {GREY}"
+                        f"— showcase model looping on core c1 (press [n] to stop){RESET}")
+            else:
+                note = (f"{DIM}{GREY}tiny INT8 model → NPU finishes instantly; "
+                        f"load stays low by design. [n] = drive it with the showcase model{RESET}")
             accc.append(note + " " * max(0, iw - vlen(note)))
 
             # ---- DAEMON panel ----
@@ -441,6 +453,8 @@ def main():
 
             foot = (f"{DIM}{WHITE}[q]{RESET}{GREY} quit   "
                     f"{DIM}{WHITE}[a]/[space]{RESET}{GREY} inject anomaly   "
+                    f"{DIM}{WHITE}[n]{RESET}{GREY} NPU stress   "
+                    f"{DIM}{WHITE}[c]{RESET}{GREY} clear log   "
                     f"{PURPLE}sentinel-imx{GREY} demo dashboard{RESET}")
             out.append(foot + "\033[K")
             out.append("\033[J")  # clear below
@@ -461,9 +475,26 @@ def main():
                                 k.write("sentinel-demo-inject: " + msg + "\n")
                         except OSError:
                             pass
+                    elif ch in ("c", "C"):
+                        jr.lines.clear()
+                    elif ch in ("n", "N"):
+                        # Toggle the NPU stress generator (drives the load meter).
+                        if npu_load is not None and npu_load.poll() is None:
+                            npu_load.terminate()
+                            npu_load = None
+                        else:
+                            try:
+                                npu_load = subprocess.Popen(
+                                    ["python3", NPU_LOAD_SCRIPT, SHOWCASE_MODEL],
+                                    stdout=subprocess.DEVNULL,
+                                    stderr=subprocess.DEVNULL)
+                            except Exception:
+                                npu_load = None
             else:
                 time.sleep(0.25)
     finally:
+        if npu_load is not None and npu_load.poll() is None:
+            npu_load.terminate()
         jr.close()
         sys.stdout.write(RESET + "\033[?25h\033[2J\033[H")
         sys.stdout.flush()
