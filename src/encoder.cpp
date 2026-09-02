@@ -1,5 +1,6 @@
 #include "encoder.hpp"
 
+#include <cmath>
 #include <cstdint>
 
 namespace sentinel {
@@ -43,12 +44,26 @@ FeatureVector encode(const std::string& tmpl) {
         acc[bin] += sign;
     }
 
-    FeatureVector out{};
+    // L2-normalize the histogram, then rescale to the int8 range. This is the
+    // key to meaningful anomaly scores: without it the reconstruction MSE grows
+    // with the raw token count, so the model ends up ranking events by *length*
+    // rather than novelty (a short line always looks "normal"). Projecting every
+    // event onto the unit sphere removes that magnitude bias, so the loss
+    // reflects which token *pattern* occurred, not how many tokens there were.
+    double norm2 = 0.0;
     for (std::size_t k = 0; k < kFeatureDim; ++k) {
-        int32_t v = acc[k];
-        if (v > 127) v = 127;
-        if (v < -127) v = -127;
-        out[k] = static_cast<int8_t>(v);
+        norm2 += static_cast<double>(acc[k]) * acc[k];
+    }
+
+    FeatureVector out{};
+    if (norm2 > 0.0) {
+        const double scale = 127.0 / std::sqrt(norm2);
+        for (std::size_t k = 0; k < kFeatureDim; ++k) {
+            long q = std::lround(acc[k] * scale);
+            if (q > 127) q = 127;
+            if (q < -127) q = -127;
+            out[k] = static_cast<int8_t>(q);
+        }
     }
     return out;
 }

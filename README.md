@@ -37,6 +37,13 @@ shipping, data stays local.
 It's an **autoencoder for logs**: it's trained only on normal traffic, so when it
 sees something unfamiliar it reconstructs it poorly (high error = anomaly).
 
+Each event is reduced to a template (PIDs/addresses/UUIDs/numbers masked), hashed
+into a 64-bin signed histogram, and **L2-normalized** before it hits the model.
+That normalization matters: without it the reconstruction error just tracks how
+*many* tokens a line has, so the model ranks events by length and a short kernel
+`BUG:` line looks more "normal" than routine chatter. Projecting every event onto
+the unit sphere makes the score reflect the token *pattern* — novelty, not size.
+
 ## Design highlights
 
 - **Capture-first.** With no model present (`mode=auto`), the daemon just records
@@ -61,7 +68,9 @@ scripts/on-alert.sh       Alert hook stub (customize this)
 scripts/sentinel-tui.py   Neon '80s dashboard for demos (run on the board)
 scripts/demo.sh           One-screen tmux live demo (run on the board)
 scripts/npu-bench.sh      CPU-vs-NPU latency benchmark (run on the board)
-tools/                    Host-side training + capture export
+scripts/npu-load.py       NPU load generator (drives the load meter for demos)
+tools/                    Host-side training + capture export (+ diag_loss.py)
+tools/sentinel_features.py  Python mirror of the C++ sanitize+encode pipeline
 src/                      Daemon sources
 LICENSE / NOTICE          Apache-2.0
 ```
@@ -137,7 +146,7 @@ overridden by a `SENTINEL_<KEY>` environment variable. Key options:
 | `mode`               | `auto`                                         | `auto` / `capture` / `infer`              |
 | `model_path`         | `/usr/share/sentinel-imx/model_quant.tflite`   | TFLite autoencoder                        |
 | `delegate_path`      | `/usr/lib/libvx_delegate.so`                   | Vivante VX external delegate              |
-| `threshold`          | `0.5`                                          | MSE anomaly threshold                     |
+| `threshold`          | `45`                                           | MSE anomaly threshold (model-specific; the trainer suggests one in `out/threshold.txt`) |
 | `alert_script`       | `/usr/libexec/sentinel-imx/on-alert.sh`        | Program run on anomaly                    |
 | `alert_cooldown_sec` | `10`                                           | Min seconds between alerts                |
 | `capture_path`       | `/var/lib/sentinel-imx/capture.jsonl`          | JSONL training data                       |
@@ -156,11 +165,20 @@ overridden by a `SENTINEL_<KEY>` environment variable. Key options:
 `scripts/sentinel-tui.py` is a dependency-free ('80s synthwave) full-screen
 dashboard: animated banner, per-core CPU bars + sparklines, Vivante GPU/NPU
 load, memory/temp/uptime, the daemon's live vitals, and a colorized live event
-stream. Press `a` (or space) to inject a synthetic anomaly on camera; `q` quits.
+stream. Keys on camera:
+
+- `a` / `space` — inject a synthetic anomaly (watch the alert fire in the stream)
+- `n` — toggle **NPU stress**: loops the large showcase model on the NPU so the
+  accelerator meter (`core c1`) climbs to ~40–80% while the GPU (`core c0`) stays
+  flat — a live, honest proof that the work lands on the NPU. Copy the showcase
+  model + load generator to the board first (see below).
+- `q` — quit
 
 ```bash
-# copy it once, then run over an SSH TTY so keys work:
-scp scripts/sentinel-tui.py root@<board>:/usr/local/bin/
+# copy the dashboard, load generator, and showcase model once:
+scp scripts/sentinel-tui.py scripts/npu-load.py root@<board>:/usr/local/bin/
+scp out/model_showcase.tflite root@<board>:/usr/share/sentinel-imx/
+# then run over an SSH TTY so keys work:
 ssh -t root@<board> 'python3 /usr/local/bin/sentinel-tui.py'
 ```
 
@@ -188,10 +206,23 @@ barely moves → because the model is running through the NPU delegate.
 
 ### Proving the NPU is engaged
 
-The i.MX NPU load gauge (`/sys/kernel/debug/gc/load`) stays near 0% for this
-workload — a tiny INT8 autoencoder finishes each inference almost instantly, so
-there are no sustained "busy cycles" to show. That's expected; the honest proof
-of NPU use is:
+The i.MX NPU load gauge (`/sys/kernel/debug/gc/load`) stays near 0% for the
+*production* workload — a tiny INT8 autoencoder finishes each inference almost
+instantly (even ~6000 inferences/sec only registers ~3%), so there are no
+sustained "busy cycles" to show. That's the efficiency story, not a bug. Two
+ways to prove the NPU is really doing the work:
+
+**Live (visual).** Press `n` in the dashboard, or run the load generator
+directly. It loops the large showcase model on the NPU and the meter climbs to
+~40–80% on `core c1` (the NPU) while `core c0` (the 3D GPU) stays at 0%:
+
+```bash
+USE_GPU_INFERENCE=0 python3 scripts/npu-load.py \
+    /usr/share/sentinel-imx/model_showcase.tflite
+watch -n1 cat /sys/kernel/debug/gc/load     # core 1 (NPU) rises; core 0 stays 0
+```
+
+**Static (binding + residency).** Regardless of load:
 
 ```bash
 # 1. The daemon is bound to the Vivante NPU/GPU driver:
@@ -243,10 +274,25 @@ Reproduce the comparison on your board:
 1. Run in `capture` (or `auto` without a model) to collect `capture.jsonl`.
 2. Copy it off the board into `./data/capture.jsonl`.
 3. `docker compose run --rm dev ./docker/scripts/train.sh data/capture.jsonl`.
-4. Copy `out/model_quant.tflite` to the board and restart the service.
+4. Copy `out/model_quant.tflite` to the board, set `threshold` from
+   `out/threshold.txt` in the config, and restart the service.
 
-The model is a small autoencoder (`64 -> 32 -> 64`, INT8 in/out) trained on the
-same feature vectors the daemon produces, so training matches inference exactly.
+The model is a small autoencoder (`64 -> 32 -> 64`, INT8 in/out). Training
+**re-encodes the captured templates** with the exact same normalized encoder the
+daemon uses (`tools/sentinel_features.py` mirrors `src/encoder.cpp`), so training
+matches inference byte-for-byte. Two details make the scores meaningful:
+
+- **Deduplication** (`--dedupe`, on by default in `train.sh`): each distinct
+  normal template is learned once, so a handful of very frequent patterns (e.g.
+  session churn) can't dominate and leave rare-but-normal messages under-learned.
+- **Excludes synthetic/demo traffic**: templates containing `demo-inject`,
+  `npuload`, or `loadtest` are dropped, so the model never learns the very
+  anomalies you inject (or the benchmark load generators) as "normal".
+
+After export the trainer runs the quantized model over the normal set, prints the
+loss distribution, and writes a suggested `threshold` (~3x the p90 steady-state
+floor) to `out/threshold.txt`. `tools/diag_loss.py` prints normal-vs-anomaly
+losses if you want to eyeball the separation before deploying.
 
 Training runs under the Keras 2 API (`tf-keras`, selected via
 `TF_USE_LEGACY_KERAS=1`): TensorFlow 2.16 defaults to Keras 3, whose graph the

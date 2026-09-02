@@ -22,8 +22,11 @@ private:
     std::string script_path_;
     int cooldown_sec_;
     double threshold_;
-    std::chrono::steady_clock::time_point last_fire_{};
-    bool fired_once_ = false;
+    // Cooldown is tracked per source: a stream of routine D-Bus events must not
+    // mask an anomaly that arrives on /dev/kmsg (and vice-versa). Index by
+    // Source's underlying value.
+    std::chrono::steady_clock::time_point last_fire_[2]{};
+    bool fired_once_[2]{false, false};
 };
 
 }  // namespace sentinel
