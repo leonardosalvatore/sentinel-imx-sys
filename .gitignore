@@ -1,0 +1,27 @@
+# Build output
+/build/
+/build-aarch64/
+/out/
+*.o
+*.a
+
+# Fetched sources / SDK artifacts
+/_deps/
+
+# Bundled (license-restricted) NXP SDK installers
+/docker/sdk/*.sh
+
+# Captured data and trained models
+/data/
+*.tflite
+*.jsonl
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# Editor
+.vscode/
+.idea/
+*.swp

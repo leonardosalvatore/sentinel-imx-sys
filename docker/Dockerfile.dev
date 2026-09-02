@@ -1,0 +1,93 @@
+# syntax=docker/dockerfile:1.6
+#
+# Self-contained cross-build + model-training environment for sentinel-imx-sys.
+#
+# It installs a Scarthgap (Yocto 5.0 LTS) aarch64 SDK - the same Yocto series as
+# NXP LF 6.6.52 - which gives us the aarch64 cross toolchain in the familiar
+# board-SDK layout (environment-setup-* + sysroots/). TensorFlow Lite and the
+# Vivante delegate are NOT in that SDK: TFLite is fetched from NXP git at CMake
+# configure time, and libvx_delegate.so lives on the target at runtime.
+FROM ubuntu:24.04
+
+ARG DEBIAN_FRONTEND=noninteractive
+
+# Host build + Python tooling. The poky SDK ships its own gcc for the target,
+# but the installer and CMake still need host utilities.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        ca-certificates \
+        wget \
+        xz-utils \
+        git \
+        cmake \
+        ninja-build \
+        make \
+        file \
+        python3 \
+        python3-pip \
+        python3-venv \
+        pkg-config \
+        unzip \
+        dpkg-dev \
+        gawk \
+        rsync \
+        locales \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN locale-gen en_US.UTF-8
+ENV LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8
+
+# ---- Yocto aarch64 SDK -----------------------------------------------------
+# Build args come from docker-compose (which sources docker/env.sh).
+ARG SENTINEL_SDK_URL
+ARG SENTINEL_SDK_INSTALLER=sdk-installer.sh
+ARG SENTINEL_SDK_PREFIX=/opt/poky/5.0.19
+ARG SENTINEL_SDK_SHA256=
+
+# A real NXP SDK installer dropped into docker/sdk/ takes precedence over the
+# public poky download. Build context copies the whole docker/ dir.
+COPY docker/sdk/ /tmp/nxp-sdk/
+
+RUN --mount=type=cache,target=/sdk-cache \
+    set -eux; \
+    NXP_SDK="$(find /tmp/nxp-sdk -maxdepth 1 -name '*.sh' | head -n1 || true)"; \
+    if [ -n "${NXP_SDK}" ]; then \
+        echo "Using bundled NXP SDK installer: ${NXP_SDK}"; \
+        INSTALLER="${NXP_SDK}"; \
+    else \
+        echo "Downloading Scarthgap poky SDK from ${SENTINEL_SDK_URL}"; \
+        if [ ! -f "/sdk-cache/${SENTINEL_SDK_INSTALLER}" ]; then \
+            wget -q -O "/sdk-cache/${SENTINEL_SDK_INSTALLER}" "${SENTINEL_SDK_URL}"; \
+        fi; \
+        if [ -n "${SENTINEL_SDK_SHA256}" ]; then \
+            echo "${SENTINEL_SDK_SHA256}  /sdk-cache/${SENTINEL_SDK_INSTALLER}" | sha256sum -c -; \
+        fi; \
+        INSTALLER="/sdk-cache/${SENTINEL_SDK_INSTALLER}"; \
+    fi; \
+    chmod +x "${INSTALLER}"; \
+    # -y: non-interactive, -d: install prefix. Use the STANDARD toolchain (not
+    # the extensible one, which refuses to install as root).
+    "${INSTALLER}" -y -d "${SENTINEL_SDK_PREFIX}"; \
+    rm -rf /tmp/nxp-sdk; \
+    ls "${SENTINEL_SDK_PREFIX}"/environment-setup-* >/dev/null
+
+# ---- aarch64 libsystemd (headers + link stubs) -----------------------------
+# The minimal poky SDK has no systemd. Pull Ubuntu arm64 libsystemd (plus its
+# link-time deps) into a side sysroot so we can compile/link sd-bus + sd-event.
+# The real libsystemd on the i.MX board is used at runtime.
+COPY docker/scripts/fetch-libsystemd.sh /usr/local/bin/fetch-libsystemd.sh
+RUN chmod +x /usr/local/bin/fetch-libsystemd.sh && \
+    /usr/local/bin/fetch-libsystemd.sh /opt/sysroot-extra
+
+# ---- Python training deps --------------------------------------------------
+# tf-keras provides the Keras 2 API. TF 2.16 bundles Keras 3, whose graph the
+# full-int8 TFLite quantizer cannot lower (LLVM "Failed to infer result type").
+# The training script sets TF_USE_LEGACY_KERAS=1 to route tf.keras -> Keras 2.
+RUN pip3 install --break-system-packages --no-cache-dir \
+        "numpy>=1.26,<2.0" \
+        "tensorflow-cpu==2.16.1" \
+        "tf-keras==2.16.0"
+
+ENV SENTINEL_SDK_PREFIX=${SENTINEL_SDK_PREFIX} \
+    SENTINEL_LIBSYSTEMD_ROOT=/opt/sysroot-extra
+
+WORKDIR /work

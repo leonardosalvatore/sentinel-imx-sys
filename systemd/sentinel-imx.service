@@ -1,0 +1,41 @@
+[Unit]
+Description=Sentinel i.MX log-anomaly detection daemon
+Documentation=https://example.invalid/sentinel-imx-sys
+After=dbus.service systemd-journald.service
+Wants=dbus.service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/sentinel-imxd --config /etc/sentinel-imx/sentinel-imx.conf
+Restart=on-failure
+RestartSec=5
+
+# Target the NPU (not the 3D GPU) when using the Vivante VX delegate.
+Environment=USE_GPU_INFERENCE=0
+
+# The daemon reads /dev/kmsg and the system bus, and writes its capture file.
+StateDirectory=sentinel-imx
+ReadWritePaths=/var/lib/sentinel-imx
+
+# Hardening. /dev/kmsg + system bus need root; keep the surface small.
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+NoNewPrivileges=true
+ProtectControlGroups=true
+ProtectKernelModules=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+MemoryDenyWriteExecute=false
+CapabilityBoundingSet=CAP_SYSLOG
+# Naming any DeviceAllow switches systemd to a device allow-list (only the
+# listed nodes + systemd's small default set are reachable), so every device we
+# use must be listed explicitly:
+#   - /dev/kmsg   : kernel-message ingest (read)
+#   - /dev/galcore: Vivante NPU/GPU delegate
+DeviceAllow=/dev/kmsg r
+DeviceAllow=/dev/galcore rw
+SupplementaryGroups=systemd-journal
+
+[Install]
+WantedBy=multi-user.target

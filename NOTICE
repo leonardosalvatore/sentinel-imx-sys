@@ -1,0 +1,20 @@
+sentinel-imx-sys
+Copyright 2026 sentinel-imx-sys contributors
+
+This product includes software developed as an on-device log-anomaly
+detection daemon for the NXP i.MX 8M Plus.
+
+Licensed under the Apache License, Version 2.0. See the LICENSE file.
+
+--------------------------------------------------------------------------------
+Third-party components (fetched or linked at build/runtime, not vendored here):
+
+  * TensorFlow Lite (NXP i.MX fork, https://github.com/nxp-imx/tensorflow-imx)
+    Apache License 2.0. Fetched at CMake configure time and statically linked.
+
+  * libsystemd (sd-event / sd-bus), https://github.com/systemd/systemd
+    LGPL-2.1-or-later. Linked dynamically; provided by the target OS at runtime.
+
+  * Vivante VX external delegate (libvx_delegate.so)
+    Provided by the NXP BSP on the target device; loaded at runtime for NPU
+    acceleration. Not distributed with this project.
