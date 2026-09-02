@@ -58,7 +58,8 @@ docker/                   SDK download + cross-build + training image
 config/sentinel-imx.conf  Runtime configuration
 systemd/                  Service unit
 scripts/on-alert.sh       Alert hook stub (customize this)
-scripts/demo.sh           One-screen live demo (tmux, run on the board)
+scripts/sentinel-tui.py   Neon '80s dashboard for demos (run on the board)
+scripts/demo.sh           One-screen tmux live demo (run on the board)
 scripts/npu-bench.sh      CPU-vs-NPU latency benchmark (run on the board)
 tools/                    Host-side training + capture export
 src/                      Daemon sources
@@ -149,6 +150,21 @@ overridden by a `SENTINEL_<KEY>` environment variable. Key options:
 (`kmsg`/`dbus`), `SENTINEL_TEMPLATE`, `SENTINEL_RAW` (truncated).
 
 ## Live demo (on the board)
+
+### Option A — neon dashboard (best for recording)
+
+`scripts/sentinel-tui.py` is a dependency-free ('80s synthwave) full-screen
+dashboard: animated banner, per-core CPU bars + sparklines, Vivante GPU/NPU
+load, memory/temp/uptime, the daemon's live vitals, and a colorized live event
+stream. Press `a` (or space) to inject a synthetic anomaly on camera; `q` quits.
+
+```bash
+# copy it once, then run over an SSH TTY so keys work:
+scp scripts/sentinel-tui.py root@<board>:/usr/local/bin/
+ssh -t root@<board> 'python3 /usr/local/bin/sentinel-tui.py'
+```
+
+### Option B — tmux four-pane split
 
 `scripts/demo.sh` splits your terminal into a single screen that tells the whole
 story — run it on the board (needs `tmux`):
