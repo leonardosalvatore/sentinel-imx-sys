@@ -1,0 +1,27 @@
+# Self-contained cross-build + training environment.
+#
+#   docker compose build
+#   docker compose run --rm dev ./docker/scripts/build.sh
+#   docker compose run --rm dev ./docker/scripts/train.sh data/capture.jsonl
+#
+# Build args mirror docker/env.sh; override on the CLI or via a .env file.
+services:
+  dev:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.dev
+      args:
+        SENTINEL_SDK_URL: ${SENTINEL_SDK_URL:-https://downloads.yoctoproject.org/releases/yocto/yocto-5.0.19/toolchain/x86_64/poky-glibc-x86_64-core-image-sato-cortexa57-qemuarm64-toolchain-5.0.19.sh}
+        SENTINEL_SDK_INSTALLER: ${SENTINEL_SDK_INSTALLER:-poky-glibc-x86_64-core-image-sato-cortexa57-qemuarm64-toolchain-5.0.19.sh}
+        SENTINEL_SDK_PREFIX: ${SENTINEL_SDK_PREFIX:-/opt/poky/5.0.19}
+        SENTINEL_SDK_SHA256: ${SENTINEL_SDK_SHA256:-}
+    image: sentinel-imx-dev:latest
+    working_dir: /work
+    volumes:
+      - .:/work
+    environment:
+      SENTINEL_TFLITE_REPO: ${SENTINEL_TFLITE_REPO:-https://github.com/nxp-imx/tensorflow-imx.git}
+      SENTINEL_TFLITE_TAG: ${SENTINEL_TFLITE_TAG:-lf-6.6.52_2.2.0}
+      SENTINEL_LIBSYSTEMD_ROOT: /opt/sysroot-extra
+    # Keep an interactive shell available: `docker compose run --rm dev bash`
+    command: ["bash"]
