@@ -9,16 +9,90 @@ a fixed **INT8 `[1, 64]`** vector, optionally runs a TensorFlow Lite autoencoder
 on the **Vivante NPU** via the VX external delegate, and — when the reconstruction
 loss (MSE) exceeds a threshold — runs an external alert script.
 
+## Architecture
+
+### System architecture
+
+Everything runs **on the device**. Kernel and D-Bus events flow through a single
+`sd-event` loop, get turned into a normalized INT8 feature vector, and are scored
+by a TensorFlow Lite autoencoder that is offloaded to the Vivante NPU. A high
+reconstruction error triggers a user-supplied action script.
+
 ```mermaid
 flowchart LR
-  kmsg["/dev/kmsg"] --> loop
-  dbus["D-Bus system bus"] --> loop
-  loop["sd-event loop"] --> clean["Sanitize + template"]
-  clean --> enc["INT8 vector [1,64]"]
-  enc --> cap["JSONL capture"]
-  enc --> inf["TFLite + VX NPU"]
-  inf --> mse["Dequant MSE"]
-  mse -->|"loss > threshold"| script["on-alert.sh"]
+  subgraph board["i.MX 8M Plus · Yocto / Debian"]
+    direction LR
+    subgraph src["Event sources"]
+      direction TB
+      kmsg["/dev/kmsg<br/>kernel log"]
+      dbus["D-Bus system bus<br/>systemd + logind"]
+    end
+
+    subgraph daemon["sentinel-imxd · systemd service"]
+      direction TB
+      loop["sd-event loop"]
+      san["Sanitize → template<br/>mask PID / addr / UUID / num"]
+      enc["Encode → INT8 [1,64]<br/>signed hash + L2 normalize"]
+      inf["TFLite autoencoder<br/>reconstruct"]
+      mse["Dequantize → MSE<br/>compare to threshold"]
+      loop --> san --> enc --> inf --> mse
+    end
+
+    npu["Vivante NPU<br/>libvx_delegate.so"]
+    cap[("capture.jsonl<br/>training data")]
+    alert["on-alert.sh<br/>LED · restart · notify"]
+
+    kmsg --> loop
+    dbus --> loop
+    enc -. append .-> cap
+    inf <-->|offload| npu
+    mse -->|"loss &gt; threshold"| alert
+  end
+```
+
+### Training & detection workflow
+
+The daemon captures normal traffic; you train a model from it on the host (in the
+Docker environment) using the **same encoder** the daemon runs, then deploy the
+model and its calibrated threshold back to the board. Detection is a per-event
+reconstruction-error check against that threshold.
+
+```mermaid
+flowchart TB
+  subgraph collect["1 · Collect on board"]
+    direction TB
+    runcap["Run daemon in capture / auto mode"]
+    jsonl[("capture.jsonl<br/>sanitized templates")]
+    runcap --> jsonl
+  end
+
+  subgraph train["2 · Train on host · Docker"]
+    direction TB
+    reenc["Re-encode templates<br/>sentinel_features.py ≡ encoder.cpp"]
+    prep["Dedupe + drop demo / load-test rows"]
+    ae["Train autoencoder<br/>normal traffic only"]
+    quant["Full-INT8 quantize<br/>→ model_quant.tflite"]
+    calib["Calibrate threshold<br/>≈ 3× p90 normal loss"]
+    reenc --> prep --> ae --> quant --> calib
+  end
+
+  subgraph detect["3 · Detect on board · per event"]
+    direction TB
+    line["New log line"]
+    enc2["Sanitize + encode INT8 [1,64]"]
+    recon["NPU autoencoder reconstruct"]
+    loss["MSE input vs output"]
+    decide{"loss &gt; threshold?"}
+    fire["Alert → on-alert.sh"]
+    ignore["Ignore · keep capturing"]
+    line --> enc2 --> recon --> loss --> decide
+    decide -->|yes| fire
+    decide -->|no| ignore
+  end
+
+  jsonl -->|copy off board| reenc
+  quant -->|deploy model| recon
+  calib -->|set threshold| decide
 ```
 
 ## What it does, in plain terms
