@@ -21,13 +21,31 @@ from sentinel_features import FEATURE_DIM, encode, sanitize
 MODEL = os.environ.get("MODEL", "/usr/share/sentinel-imx/model_quant.tflite")
 CAPTURE = os.environ.get("CAPTURE", "/var/lib/sentinel-imx/capture.jsonl")
 
+# Keep in sync with scripts/sentinel-tui.py ANOMALIES (same strings, prefixed
+# with the injector tag the daemon sees on /dev/kmsg).
 ANOMALIES = [
     "sentinel-demo-inject: kernel BUG: unable to handle kernel paging request at 00000000",
+    "sentinel-demo-inject: Unable to handle kernel NULL pointer dereference at virtual address 00000000",
+    "sentinel-demo-inject: Oops: 0000 [#1] SMP PREEMPT",
     "sentinel-demo-inject: Out of memory: Killed process 4242 (rogue) total-vm:900000kB",
+    "sentinel-demo-inject: page allocation failure: order:4, mode:0x40cc0(GFP_KERNEL)",
+    "sentinel-demo-inject: Kernel panic - not syncing: Out of memory and no killable processes",
     "sentinel-demo-inject: EXT4-fs error (device mmcblk0p2): ext4_find_entry: reading directory lblock",
-    "sentinel-demo-inject: usb 1-1: device descriptor read/64, error -110",
+    "sentinel-demo-inject: EXT4-fs (mmcblk0p2): mounted filesystem read-only due to errors",
+    "sentinel-demo-inject: blk_update_request: I/O error, dev mmcblk0, sector 204800",
+    "sentinel-demo-inject: mmc0: Timeout waiting for hardware interrupt",
+    "sentinel-demo-inject: JBD2: Detected IO errors while flushing file data on mmcblk0p2-8",
     "sentinel-demo-inject: watchdog: BUG: soft lockup - CPU#2 stuck for 22s!",
+    "sentinel-demo-inject: rcu: INFO: rcu_sched self-detected stall on CPU",
+    "sentinel-demo-inject: INFO: task kworker/0:1 blocked for more than 120 seconds",
+    "sentinel-demo-inject: thermal thermal_zone0: critical temperature reached, shutting down",
+    "sentinel-demo-inject: usb 1-1: device descriptor read/64, error -110",
+    "sentinel-demo-inject: i2c i2c-1: transfer timed out",
+    "sentinel-demo-inject: spi_master spi0: SPI transfer timed out",
+    "sentinel-demo-inject: fec 30be0000.ethernet eth0: MDIO read timeout",
+    "sentinel-demo-inject: eth0: Link is Down",
     'sentinel-demo-inject: audit: type=1400 avc: denied { execute } for pid=1337 comm="suspicious"',
+    "sentinel-demo-inject: systemd[1]: critical.service: Main process exited, code=dumped, status=11/SEGV",
 ]
 
 

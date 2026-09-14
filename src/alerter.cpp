@@ -75,8 +75,11 @@ bool Alerter::fire(Source source, const std::string& tmpl, const std::string& ra
 
     // Reap the short-lived intermediate.
     waitpid(pid, nullptr, 0);
-    SENTINEL_LOG_INFO("alert fired: source=%s loss=%.4f > %.4f",
-                      source_name(source), loss, threshold_);
+    // Include the intercepted message so the journal shows what actually
+    // tripped the alert (raw kmsg / journal log line, or serialized D-Bus
+    // signal). raw_trunc is already length-bounded.
+    SENTINEL_LOG_INFO("alert fired: source=%s loss=%.4f > %.4f | %s",
+                      source_name(source), loss, threshold_, raw_trunc.c_str());
     return true;
 }
 

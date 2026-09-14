@@ -1,0 +1,116 @@
+// sentinel-imx-sys - end-to-end pipeline (train -> deploy -> run)
+// Neon '80s synthwave styling on a dark background.
+// Rendered by scripts/make-diagram.sh:  dot -Tpng docs/pipeline.dot
+digraph sentinel {
+    graph [
+        bgcolor="transparent",
+        rankdir=TB,
+        nodesep=0.30,
+        ranksep=0.55,
+        fontname="DejaVu Sans",
+        pad=0.3,
+        splines=spline,
+    ];
+    node [
+        shape=box,
+        style="filled,rounded",
+        fontname="DejaVu Sans Bold",
+        fontsize=15,
+        fontcolor="#e8e8ff",
+        color="#00e5ff",
+        fillcolor="#141433",
+        penwidth=2.2,
+        margin="0.20,0.12",
+    ];
+    edge [
+        color="#8a8ad0",
+        penwidth=2.0,
+        arrowsize=0.9,
+        fontname="DejaVu Sans",
+        fontsize=12,
+        fontcolor="#b9b9ff",
+    ];
+
+    // ---------------------------------------------------------------
+    // 1 - TRAIN (host / Docker)
+    // ---------------------------------------------------------------
+    subgraph cluster_host {
+        label="  1 · TRAIN — your computer · Docker  ";
+        labeljust="l";
+        fontname="DejaVu Sans Bold";
+        fontsize=19;
+        fontcolor="#00e5ff";
+        color="#00e5ff";
+        penwidth=2.6;
+        style="rounded";
+        margin=16;
+
+        node [color="#00e5ff", fillcolor="#0f2233"];
+
+        cap   [label="capture.jsonl  ·  sanitized templates captured on the board", shape=cylinder, fillcolor="#0c1a26"];
+        reenc [label="re-encode   sentinel_features.py  ≡  encoder.cpp"];
+        prep  [label="dedupe  +  drop demo / load-test rows"];
+        ae    [label="train autoencoder   ·   normal traffic only"];
+        quant [label="full-INT8 quantize   →   model_quant.tflite"];
+        calib [label="calibrate threshold   ≈   3× p90 normal loss"];
+
+        cap -> reenc -> prep -> ae -> quant -> calib;
+    }
+
+    // ---------------------------------------------------------------
+    // 2 - DEPLOY
+    // ---------------------------------------------------------------
+    subgraph cluster_deploy {
+        label="  2 · DEPLOY  ";
+        labeljust="l";
+        fontname="DejaVu Sans Bold";
+        fontsize=19;
+        fontcolor="#ffd400";
+        color="#ffd400";
+        penwidth=2.6;
+        style="rounded";
+        margin=16;
+
+        deploy [label="scripts/deploy.sh <board-ip>\nscp  binary · model · config · scripts   +   systemctl restart  (over SSH)",
+                color="#ffd400", fillcolor="#2a2410", fontcolor="#fff4c2"];
+    }
+
+    // ---------------------------------------------------------------
+    // 3 - RUN (device)
+    // ---------------------------------------------------------------
+    subgraph cluster_device {
+        label="  3 · RUN — NXP i.MX 8M Plus · Yocto / Debian  ";
+        labeljust="l";
+        fontname="DejaVu Sans Bold";
+        fontsize=19;
+        fontcolor="#ff2fb9";
+        color="#ff2fb9";
+        penwidth=2.6;
+        style="rounded";
+        margin=16;
+
+        node [color="#ff4fd8", fillcolor="#2a0f24"];
+
+        journal [label="systemd-journald\nkernel + userspace logs", color="#39ff14", fillcolor="#10240c", fontcolor="#d6ffcf"];
+        dbus  [label="D-Bus system bus\nsystemd + logind", color="#39ff14", fillcolor="#10240c", fontcolor="#d6ffcf"];
+        loop  [label="sd-event loop"];
+        san   [label="sanitize → template   ·   mask PID / addr / UUID / num"];
+        enc   [label="encode INT8 [1,64]   ·   signed hash + L2-normalize"];
+        inf   [label="TFLite autoencoder  ·  reconstruct"];
+        npu   [label="Vivante NPU\nlibvx_delegate.so", color="#b26bff", fillcolor="#1e1030", fontcolor="#e9d8ff", penwidth=2.6];
+        mse   [label="dequantize → MSE   vs   threshold"];
+        alert [label="on-alert.sh   ·   LED · restart · notify", color="#ff8a00", fillcolor="#2a1804", fontcolor="#ffe0b8"];
+
+        journal -> loop;
+        dbus -> loop;
+        loop -> san -> enc -> inf -> mse;
+        inf -> npu [dir=both, label="offload", color="#b26bff", fontcolor="#c9a8ff", style=dashed, constraint=false];
+        mse -> alert [label="loss > threshold", color="#ff8a00", fontcolor="#ffb066", penwidth=2.6];
+    }
+
+    // ---------------------------------------------------------------
+    // cross-stage flow (train -> deploy -> run)
+    // ---------------------------------------------------------------
+    calib  -> deploy [label="model_quant.tflite\n+ threshold", color="#ffd400", fontcolor="#ffe98a", penwidth=2.6];
+    deploy -> inf    [label="installed on device", color="#ffd400", fontcolor="#ffe98a", penwidth=2.6];
+}
