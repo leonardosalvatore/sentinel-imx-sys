@@ -9,10 +9,15 @@ struct sd_event;
 
 namespace sentinel {
 
-enum class Source { Kmsg, Dbus };
+enum class Source { Kmsg, Dbus, Journal };
 
 inline const char* source_name(Source s) {
-    return s == Source::Kmsg ? "kmsg" : "dbus";
+    switch (s) {
+        case Source::Kmsg: return "kmsg";
+        case Source::Dbus: return "dbus";
+        case Source::Journal: return "journal";
+    }
+    return "?";
 }
 
 // Called for every ingested log line, from any source. 'raw' is the unsanitized

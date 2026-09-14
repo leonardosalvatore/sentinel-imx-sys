@@ -22,7 +22,7 @@ set(SENTINEL_TFLITE_TAG "lf-6.6.52_2.2.0"
     CACHE STRING "Git tag/branch for the TensorFlow Lite sources")
 
 # ---------------------------------------------------------------------------
-# libsystemd (sd-event, sd-bus)
+# libsystemd (sd-event, sd-bus, sd-journal)
 # ---------------------------------------------------------------------------
 add_library(sentinel_systemd INTERFACE)
 
@@ -32,7 +32,7 @@ if(SENTINEL_LIBSYSTEMD_ROOT)
     # which would otherwise re-root these explicit paths under the target
     # sysroot. This side sysroot lives outside it, so search the paths verbatim.
     find_path(SENTINEL_SD_INCLUDE_DIR
-        NAMES systemd/sd-bus.h systemd/sd-event.h
+        NAMES systemd/sd-bus.h systemd/sd-event.h systemd/sd-journal.h
         PATHS "${SENTINEL_LIBSYSTEMD_ROOT}/usr/include"
         NO_DEFAULT_PATH
         NO_CMAKE_FIND_ROOT_PATH)
@@ -99,7 +99,7 @@ add_executable(sentinel-imxd
     src/main.cpp
     src/config.cpp
     src/event_loop.cpp
-    src/kmsg_source.cpp
+    src/journal_source.cpp
     src/dbus_source.cpp
     src/sanitizer.cpp
     src/encoder.cpp

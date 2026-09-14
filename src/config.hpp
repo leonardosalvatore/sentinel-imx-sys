@@ -17,7 +17,7 @@ struct Config {
     std::string alert_script = "/usr/libexec/sentinel-imx/on-alert.sh";
     int alert_cooldown_sec = 10;
     std::string capture_path = "/var/lib/sentinel-imx/capture.jsonl";
-    bool kmsg = true;
+    bool journal = true;
     bool dbus = true;
     std::vector<std::string> dbus_matches;
 

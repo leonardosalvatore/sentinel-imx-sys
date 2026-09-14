@@ -9,7 +9,7 @@ standard library. Renders a full-screen, neon/synthwave dashboard showing:
   * Vivante GPU/NPU load (from /sys/kernel/debug/gc/load) + sparklines
   * memory + SoC temperature + uptime
   * the sentinel-imx daemon's live vitals (CPU%, RSS, events, alerts)
-  * a colorized live stream of the daemon's kernel/D-Bus detections
+  * a colorized live stream of the daemon's journal (kernel + userspace)/D-Bus detections
 
 Keys:  q = quit   a / SPACE = inject a synthetic anomaly into /dev/kmsg
        n = toggle NPU stress (loops the showcase model so the load meter climbs)
@@ -53,12 +53,35 @@ SPARK = " ▁▂▃▄▅▆▇█"
 ANSI_RE = re.compile(r"\033\[[0-9;]*m")
 
 ANOMALIES = [
+    # kernel memory / oops
     "kernel BUG: unable to handle kernel paging request at 00000000",
+    "Unable to handle kernel NULL pointer dereference at virtual address 00000000",
+    "Oops: 0000 [#1] SMP PREEMPT",
     "Out of memory: Killed process 4242 (rogue) total-vm:900000kB",
+    "page allocation failure: order:4, mode:0x40cc0(GFP_KERNEL)",
+    "Kernel panic - not syncing: Out of memory and no killable processes",
+    # storage / filesystem
     "EXT4-fs error (device mmcblk0p2): ext4_find_entry: reading directory lblock",
-    "usb 1-1: device descriptor read/64, error -110",
+    "EXT4-fs (mmcblk0p2): mounted filesystem read-only due to errors",
+    "blk_update_request: I/O error, dev mmcblk0, sector 204800",
+    "mmc0: Timeout waiting for hardware interrupt",
+    "JBD2: Detected IO errors while flushing file data on mmcblk0p2-8",
+    # cpu / scheduling / watchdog
     "watchdog: BUG: soft lockup - CPU#2 stuck for 22s!",
+    "rcu: INFO: rcu_sched self-detected stall on CPU",
+    "INFO: task kworker/0:1 blocked for more than 120 seconds",
+    # thermal / power
+    "thermal thermal_zone0: critical temperature reached, shutting down",
+    # usb / bus / peripherals
+    "usb 1-1: device descriptor read/64, error -110",
+    "i2c i2c-1: transfer timed out",
+    "spi_master spi0: SPI transfer timed out",
+    # network
+    "fec 30be0000.ethernet eth0: MDIO read timeout",
+    "eth0: Link is Down",
+    # security / userspace
     "audit: type=1400 avc: denied { execute } for pid=1337 comm=\"suspicious\"",
+    "systemd[1]: critical.service: Main process exited, code=dumped, status=11/SEGV",
 ]
 
 
@@ -266,6 +289,8 @@ def colorize_log(line):
         c = GREEN
     elif "dbus" in low:
         c = CYAN
+    elif "journal" in low:
+        c = PURPLE
     elif "kmsg" in low or "kernel" in low:
         c = BLUE
     else:
@@ -448,7 +473,7 @@ def main():
                 scon.append(s + " " * max(0, iw - vlen(s)))
             while len(scon) < stream_h:
                 scon.append(" " * iw)
-            for ln in panel("LIVE KERNEL / D-BUS EVENT STREAM", scon, W, PURPLE):
+            for ln in panel("LIVE JOURNAL / D-BUS EVENT STREAM", scon, W, PURPLE):
                 out.append(ln + "\033[K\n")
 
             foot = (f"{DIM}{WHITE}[q]{RESET}{GREY} quit   "

@@ -29,7 +29,7 @@ in four terminals manually:
   2) watch -n1 'cat /sys/kernel/debug/gc/load; echo; \
         grep -A4 sentinel-imxd /sys/kernel/debug/gc/database'
   3) top -d1 -p "$(systemctl show -p MainPID --value sentinel-imx)"
-  4) echo "kernel BUG: unable to handle kernel paging request" > /dev/kmsg
+  4) echo "sentinel-demo-inject: kernel BUG: unable to handle kernel paging request" > /dev/kmsg
 EOF
     exit 1
 }
@@ -60,11 +60,14 @@ tmux select-pane -t "${SESSION}:0.0"
 tmux split-window -v -t "${SESSION}:0"
 tmux send-keys -t "${SESSION}:0.2" "${TOPCMD}" C-m
 
-# [3] injector - pre-typed, presenter just hits Enter
+# [3] injector - pre-typed, presenter just hits Enter.
+# The "sentinel-demo-inject:" tag marks this as synthetic so the trainer excludes
+# it from the "normal" baseline (see DEFAULT_EXCLUDE in tools/train_autoencoder.py);
+# without it, replayed demo faults get learned as normal and stop being detected.
 tmux select-pane -t "${SESSION}:0.1"
 tmux split-window -v -t "${SESSION}:0"
 tmux send-keys -t "${SESSION}:0.3" \
-    'echo "kernel BUG: unable to handle kernel paging request at 00000000" > /dev/kmsg'
+    'echo "sentinel-demo-inject: kernel BUG: unable to handle kernel paging request at 00000000" > /dev/kmsg'
 
 tmux select-layout -t "${SESSION}:0" tiled
 tmux select-pane -t "${SESSION}:0.3"

@@ -1,7 +1,8 @@
 // sentinel-imxd: log-anomaly detection daemon for i.MX 8M Plus.
 //
-// Pipeline: /dev/kmsg + D-Bus  ->  sanitize  ->  INT8[1,64] encode
-//           ->  capture (JSONL)  ->  TFLite autoencoder (NPU)  ->  MSE
+// Pipeline: journald (kernel + userspace) + D-Bus  ->  sanitize
+//           ->  INT8[1,64] encode  ->  capture (JSONL)
+//           ->  TFLite autoencoder (NPU)  ->  MSE
 //           ->  alert script when loss > threshold.
 
 #include <memory>
@@ -14,7 +15,7 @@
 #include "encoder.hpp"
 #include "event_loop.hpp"
 #include "inferencer.hpp"
-#include "kmsg_source.hpp"
+#include "journal_source.hpp"
 #include "log.hpp"
 #include "sanitizer.hpp"
 
@@ -116,14 +117,14 @@ int main(int argc, char** argv) {
         pipeline.process(src, raw);
     };
 
-    std::unique_ptr<KmsgSource> kmsg;
+    std::unique_ptr<JournalSource> journal;
     std::unique_ptr<DbusSource> dbus;
 
-    if (cfg.kmsg) {
-        kmsg = std::make_unique<KmsgSource>(loop.get(), handler);
-        if (!kmsg->ok()) {
-            SENTINEL_LOG_WARN("kmsg source unavailable");
-            kmsg.reset();
+    if (cfg.journal) {
+        journal = std::make_unique<JournalSource>(loop.get(), handler);
+        if (!journal->ok()) {
+            SENTINEL_LOG_WARN("journal source unavailable");
+            journal.reset();
         }
     }
     if (cfg.dbus) {
@@ -134,7 +135,7 @@ int main(int argc, char** argv) {
         }
     }
 
-    if (!kmsg && !dbus) {
+    if (!journal && !dbus) {
         SENTINEL_LOG_ERR("no event sources available; exiting");
         return 1;
     }

@@ -58,8 +58,8 @@ void apply(Config& c, const std::string& key, const std::string& value) {
         }
     } else if (key == "capture_path") {
         c.capture_path = value;
-    } else if (key == "kmsg") {
-        c.kmsg = parse_bool(value, c.kmsg);
+    } else if (key == "journal") {
+        c.journal = parse_bool(value, c.journal);
     } else if (key == "dbus") {
         c.dbus = parse_bool(value, c.dbus);
     } else if (key == "dbus_match") {
@@ -102,7 +102,7 @@ Config Config::load(const std::string& path) {
     // Environment overrides for scalar keys.
     for (const char* key : {"mode", "model_path", "delegate_path", "threshold",
                             "alert_script", "alert_cooldown_sec", "capture_path",
-                            "kmsg", "dbus"}) {
+                            "journal", "dbus"}) {
         if (const char* v = env_for(key)) apply(c, key, v);
     }
 

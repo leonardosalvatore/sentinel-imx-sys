@@ -3,20 +3,42 @@
 A lightweight log-anomaly detection daemon for the **NXP i.MX 8M Plus** (Yocto /
 Debian), plus a self-contained Docker build + model-training environment.
 
-The daemon (`sentinel-imxd`) listens to kernel messages (`/dev/kmsg`) and D-Bus
-system-bus signals, sanitizes each line into a stable *template*, encodes it into
+The daemon (`sentinel-imxd`) listens to the **systemd journal** (kernel messages
+plus userspace service logs) and D-Bus system-bus signals, sanitizes each line
+into a stable *template*, encodes it into
 a fixed **INT8 `[1, 64]`** vector, optionally runs a TensorFlow Lite autoencoder
 on the **Vivante NPU** via the VX external delegate, and — when the reconstruction
 loss (MSE) exceeds a threshold — runs an external alert script.
+
+## Solution overview
+
+The whole story on one page — train on your computer (in Docker), deploy over SSH,
+and detect on the board's NPU. Regenerate it any time with
+[`scripts/make-diagram.sh`](scripts/make-diagram.sh)
+([PDF](docs/sentinel-imx-solution.pdf)).
+
+![sentinel-imx-sys solution overview: train, deploy, run](docs/sentinel-imx-solution.png)
+
+Want the *why*? The technical brief
+[**Why standard log parsing fails on embedded boards**](docs/why-on-device-anomaly-detection.pdf)
+makes the case for on-device anomaly detection over rule-based / cloud log
+parsing. Regenerate it with `python3 docs/make_whitepaper.py`.
 
 ## Architecture
 
 ### System architecture
 
-Everything runs **on the device**. Kernel and D-Bus events flow through a single
-`sd-event` loop, get turned into a normalized INT8 feature vector, and are scored
-by a TensorFlow Lite autoencoder that is offloaded to the Vivante NPU. A high
-reconstruction error triggers a user-supplied action script.
+Everything runs **on the device**. Journal (kernel + userspace) and D-Bus events
+flow through a single `sd-event` loop, get turned into a normalized INT8 feature
+vector, and are scored by a TensorFlow Lite autoencoder that is offloaded to the
+Vivante NPU. A high reconstruction error triggers a user-supplied action script.
+
+Kernel messages arrive via journald (which is the canonical `/dev/kmsg`
+consumer) rather than a second raw reader; entries with `_TRANSPORT=kernel` are
+still tagged `source=kmsg`, while other journal entries are tagged
+`source=journal`. One tradeoff: journald rate-limits (`RateLimitBurst`), so a
+severe printk storm can be dropped in the journal where a raw kmsg reader would
+still see it until the ring buffer wraps.
 
 ```mermaid
 flowchart LR
@@ -24,7 +46,7 @@ flowchart LR
     direction LR
     subgraph src["Event sources"]
       direction TB
-      kmsg["/dev/kmsg<br/>kernel log"]
+      journal["systemd-journald<br/>kernel + userspace logs"]
       dbus["D-Bus system bus<br/>systemd + logind"]
     end
 
@@ -42,7 +64,7 @@ flowchart LR
     cap[("capture.jsonl<br/>training data")]
     alert["on-alert.sh<br/>LED · restart · notify"]
 
-    kmsg --> loop
+    journal --> loop
     dbus --> loop
     enc -. append .-> cap
     inf <-->|offload| npu
@@ -125,8 +147,8 @@ the unit sphere makes the score reflect the token *pattern* — novelty, not siz
   the real board, then train and drop in `model_quant.tflite`.
 - **Actions are yours.** Alerts don't do anything hard-coded; they exec a
   configurable bash script with rich context in the environment.
-- **Minimal dependencies.** Only `libsystemd` (sd-event + sd-bus) and TensorFlow
-  Lite. No Boost, no JSON library (JSON is written/parsed by hand).
+- **Minimal dependencies.** Only `libsystemd` (sd-event + sd-bus + sd-journal)
+  and TensorFlow Lite. No Boost, no JSON library (JSON is written/parsed by hand).
 - **NPU acceleration.** Uses `/usr/lib/libvx_delegate.so` as a TFLite *external
   delegate*; `USE_GPU_INFERENCE=0` steers it to the NPU rather than the 3D GPU.
 
@@ -224,13 +246,13 @@ overridden by a `SENTINEL_<KEY>` environment variable. Key options:
 | `alert_script`       | `/usr/libexec/sentinel-imx/on-alert.sh`        | Program run on anomaly                    |
 | `alert_cooldown_sec` | `10`                                           | Min seconds between alerts                |
 | `capture_path`       | `/var/lib/sentinel-imx/capture.jsonl`          | JSONL training data                       |
-| `kmsg` / `dbus`      | `true` / `true`                                | Enable event sources                      |
+| `journal` / `dbus`   | `true` / `true`                                | Enable event sources (`journal` = systemd journal, kernel + userspace) |
 | `dbus_match`         | (built-in defaults)                            | Repeatable D-Bus match rule               |
 
 ### Alert script environment
 
 `on-alert.sh` receives: `SENTINEL_LOSS`, `SENTINEL_THRESHOLD`, `SENTINEL_SOURCE`
-(`kmsg`/`dbus`), `SENTINEL_TEMPLATE`, `SENTINEL_RAW` (truncated).
+(`kmsg`/`journal`/`dbus`), `SENTINEL_TEMPLATE`, `SENTINEL_RAW` (truncated).
 
 ## Live demo (on the board)
 

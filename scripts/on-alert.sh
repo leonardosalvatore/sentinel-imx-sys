@@ -8,7 +8,7 @@
 # The daemon passes context through the environment:
 #   SENTINEL_LOSS       - reconstruction MSE for this event
 #   SENTINEL_THRESHOLD  - configured threshold
-#   SENTINEL_SOURCE     - "kmsg" or "dbus"
+#   SENTINEL_SOURCE     - "kmsg", "journal", or "dbus"
 #   SENTINEL_TEMPLATE   - sanitized log template
 #   SENTINEL_RAW        - raw (truncated) log line
 #
