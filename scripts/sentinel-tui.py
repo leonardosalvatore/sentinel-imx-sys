@@ -89,6 +89,38 @@ def vlen(s):
     return len(ANSI_RE.sub("", s))
 
 
+def wrap_plain(text, width, hang=2):
+    """Wrap plain text to `width` columns. Continuation rows are hang-indented."""
+    text = text.replace("\t", " ").rstrip()
+    if width < 1:
+        return [""]
+    hang = 0 if width < 8 else max(0, min(hang, width - 1))
+    if not text:
+        return [""]
+    lines = []
+    rest = text
+    first = True
+    while rest:
+        limit = width if first else max(1, width - hang)
+        if len(rest) <= limit:
+            lines.append(rest if first else (" " * hang + rest))
+            break
+        chunk = rest[:limit]
+        br = -1
+        floor = max(0, limit // 4)
+        for i in range(len(chunk) - 1, floor - 1, -1):
+            if chunk[i].isspace():
+                br = i
+                break
+        if br <= 0:
+            piece, rest = rest[:limit], rest[limit:]
+        else:
+            piece, rest = rest[:br].rstrip(), rest[br:].lstrip()
+        lines.append(piece if first else (" " * hang + piece))
+        first = False
+    return lines
+
+
 def bar(frac, width, lo=GREEN, mid=YELLOW, hi=PINK):
     frac = max(0.0, min(1.0, frac))
     filled = int(round(frac * width))
@@ -279,23 +311,21 @@ class Journal:
             self.proc.terminate()
 
 
-def colorize_log(line):
+def log_color(line):
     low = line.lower()
     if "alert fired" in low or "bug" in low or "error" in low or "denied" in low:
-        c = PINK + BOLD
-    elif "suppressed" in low or "warn" in low or "unavailable" in low:
-        c = YELLOW
-    elif "ready" in low or "running" in low or "enabled" in low or "delegate" in low:
-        c = GREEN
-    elif "dbus" in low:
-        c = CYAN
-    elif "journal" in low:
-        c = PURPLE
-    elif "kmsg" in low or "kernel" in low:
-        c = BLUE
-    else:
-        c = GREY
-    return c + line + RESET
+        return PINK + BOLD
+    if "suppressed" in low or "warn" in low or "unavailable" in low:
+        return YELLOW
+    if "ready" in low or "running" in low or "enabled" in low or "delegate" in low:
+        return GREEN
+    if "dbus" in low:
+        return CYAN
+    if "journal" in low:
+        return PURPLE
+    if "kmsg" in low or "kernel" in low:
+        return BLUE
+    return GREY
 
 
 # ---------------------------------------------------------------- drawing ----
@@ -462,15 +492,19 @@ def main():
             rendered = len(banner(W, frame)) + 1  # banner + blank
             rendered += len(sysc) + 2 + len(accc) + 2 + len(dcon) + 2
             stream_h = max(3, H - rendered - 3)
-            logs = list(jr.lines)[-stream_h:]
-            scon = []
-            for ln in logs:
-                s = colorize_log(ln)
-                if vlen(s) > iw:
-                    # truncate on visible width
-                    plain = ANSI_RE.sub("", ln)[:iw - 1]
-                    s = colorize_log(plain) + "…"
-                scon.append(s + " " * max(0, iw - vlen(s)))
+            # Wrap long journal/D-Bus lines and keep the newest screen rows.
+            newest_first = []
+            for ln in reversed(jr.lines):
+                color = log_color(ln)
+                pieces = wrap_plain(ANSI_RE.sub("", ln), iw)
+                for piece in reversed(pieces):
+                    s = color + piece + RESET
+                    newest_first.append(s + " " * max(0, iw - vlen(s)))
+                    if len(newest_first) >= stream_h:
+                        break
+                if len(newest_first) >= stream_h:
+                    break
+            scon = list(reversed(newest_first))
             while len(scon) < stream_h:
                 scon.append(" " * iw)
             for ln in panel("LIVE JOURNAL / D-BUS EVENT STREAM", scon, W, PURPLE):
