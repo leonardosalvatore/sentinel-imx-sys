@@ -24,6 +24,11 @@ Want the *why*? The technical brief
 makes the case for on-device anomaly detection over rule-based / cloud log
 parsing. Regenerate it with `python3 docs/make_whitepaper.py`.
 
+## Demo
+
+https://www.youtube.com/watch?v=d_EssCpTC4E
+
+
 ## Architecture
 
 ### System architecture
